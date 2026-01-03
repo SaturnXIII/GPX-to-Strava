@@ -41,11 +41,9 @@ def tutorial_setup():
 
     code = input("\nPaste the OAuth code here: ").strip()
 
-    # --- Robust extraction of the code from URL if user pasted full URL ---
     if "code=" in code:
         code = code.split("code=")[1]
     code = code.split("&")[0]
-    # -----------------------------------------------------------------------
 
     r = requests.post(
         f"{API_BASE}/oauth/token",
@@ -58,12 +56,9 @@ def tutorial_setup():
     )
 
     data = r.json()
-
-    # --- Handle errors gracefully ---
     if "access_token" not in data:
         print("\n❌ OAuth error received from Strava:")
         print(data)
-        print("\n👉 Make sure you pasted the correct OAuth code, not the access token.")
         exit(1)
 
     config = {
@@ -102,10 +97,34 @@ def check_token(config):
     if time.time() > int(config["expires_at"]):
         refresh_token(config)
 
+# ----------------- Ask user for activity type -----------------
+def choose_activity_type():
+    print("\nChoose activity type:")
+    print("1) Ride (Vélo)")
+    print("2) Run (Course à pied)")
+    print("3) Swim (Natation)")
+    print("4) Walk (Marche)")
+    print("5) Hike (Randonnée)")
+    print("6) Workout (Autre)")
+
+    choice = input("> ").strip()
+    mapping = {
+        "1": "Ride",
+        "2": "Run",
+        "3": "Swim",
+        "4": "Walk",
+        "5": "Hike",
+        "6": "Workout"
+    }
+    return mapping.get(choice, "Workout")
+
 # ----------------- Upload single file -----------------
 def upload_file(config):
     path = input("Path to file (gpx/tcx/fit): ").strip()
     data_type = input("Data type (gpx, tcx, fit, etc.): ").strip()
+    name = input("Activity title (optional): ").strip()
+    description = input("Activity comment/description (optional): ").strip()
+    activity_type = choose_activity_type()
 
     check_token(config)
 
@@ -114,7 +133,12 @@ def upload_file(config):
             f"{API_BASE}/api/v3/uploads",
             headers={"Authorization": f"Bearer {config['access_token']}"},
             files={"file": f},
-            data={"data_type": data_type},
+            data={
+                "data_type": data_type,
+                "name": name if name else None,
+                "description": description if description else None,
+                "activity_type": activity_type
+            },
         )
 
     print("📤 Upload response:")
@@ -140,7 +164,6 @@ def upload_folder(config):
         print("❌ Folder does not exist!")
         return
 
-    # Find all GPX/TCX/FIT files
     extensions = ("*.gpx", "*.tcx", "*.fit", "*.fit.gz", "*.tcx.gz", "*.gpx.gz")
     files = []
     for ext in extensions:
@@ -150,13 +173,18 @@ def upload_folder(config):
         print("❌ No GPX/TCX/FIT files found in folder.")
         return
 
-    print(f"📂 Found {len(files)} files. Starting upload with 6s delay to respect rate limits...")
+    print(f"📂 Found {len(files)} files. Starting upload with 6s delay...")
 
     for idx, file_path in enumerate(files, start=1):
         print(f"\nUploading file {idx}/{len(files)}: {os.path.basename(file_path)}")
+
+        # Ask for title, comment, type for each file
+        name = input("Activity title (optional): ").strip()
+        description = input("Activity comment/description (optional): ").strip()
+        activity_type = choose_activity_type()
+
         check_token(config)
 
-        # Detect data type from extension
         ext = os.path.splitext(file_path)[1].lower()
         if ext in [".gpx"]:
             data_type = "gpx"
@@ -172,7 +200,7 @@ def upload_folder(config):
             elif ".fit" in ext:
                 data_type = "fit.gz"
         else:
-            data_type = "gpx"  # fallback
+            data_type = "gpx"
 
         try:
             with open(file_path, "rb") as f:
@@ -180,14 +208,18 @@ def upload_folder(config):
                     f"{API_BASE}/api/v3/uploads",
                     headers={"Authorization": f"Bearer {config['access_token']}"},
                     files={"file": f},
-                    data={"data_type": data_type},
+                    data={
+                        "data_type": data_type,
+                        "name": name if name else None,
+                        "description": description if description else None,
+                        "activity_type": activity_type
+                    },
                 )
-            resp = r.json()
-            print(resp)
+            print(r.json())
         except Exception as e:
             print(f"❌ Error uploading {file_path}: {e}")
 
-        print("⏳ Waiting 6 seconds to avoid hitting Strava rate limits...")
+        print("⏳ Waiting 6 seconds...")
         time.sleep(6)
 
     print("\n✅ All files processed.")
@@ -220,7 +252,6 @@ def menu(config):
 # ----------------- Main -----------------
 def main():
     config = load_config()
-
     required_keys = [
         "client_id",
         "client_secret",
@@ -228,7 +259,6 @@ def main():
         "refresh_token",
         "expires_at",
     ]
-
     if not all(k in config and config[k] for k in required_keys):
         config = tutorial_setup()
 
